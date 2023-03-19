@@ -14,6 +14,8 @@ import time
 import hashlib
 from datetime import datetime 
 
+SOURCE = {}
+DESTINATION = {}
 
 def main():
 
@@ -57,12 +59,6 @@ def read_file(path):
         return f.read()
 
 def write_file(path, data):
-    try:
-        if not os.path.exists(path):
-            os.makedirs(os.path.dirname(path))
-    except:
-        pass
-
     with open(path, 'wb') as f:
         f.write(data)
 
@@ -74,72 +70,73 @@ def append_file(path, data):
 def copy_file(source_file_path, destination_file_path):
     write_file(destination_file_path, read_file(source_file_path))
 
-
-def update_record(file_dict: dict, path: str, create_folder = None):
-    # for keep track of the files by storing the filename in file_dict
-    for root, dirs , files in os.walk(path): 
-        for dir in dirs:
-            for file in os.listdir(os.path.join(path, dir)):
-                    dir_file = os.path.join(dir, file)
-                    file_source = os.path.join(path, dir_file)
-                    print(dir)
-                    if create_folder is not None:
-                        print(os.path.join(create_folder, dir))
-                        # if not os.path.exists(create_folder):
-                        #     os.makedirs(os.path.join(create_folder, dir))
-
-                    file_dict[os.path.join(dir, file)] = hashlib.md5(read_file(file_source)).hexdigest()
-
-
-
-        # for dir in dirs:
-        #     for file in os.listdir(os.path.join(path, dir)):
-        #         if not file.endswith('.DS_Store'):
-        #             file_source = os.path.join(path, os.path.join(dir, file))
-        #             print(file_source)
-        #             if file_source not in file_dict:
-        #                 file_dict[os.path.join(dir, file)] = hashlib.md5(read_file(file_source)).hexdigest()
-
-
-        # for file in files:
-        #     if not file.endswith('.DS_Store'):
-        #         file_source = os.path.join(root, file)
-        #         if file_source not in file_dict:
-        #             file_dict[file] = hashlib.md5(read_file(file_source)).hexdigest()
-            
-
-def synchronize(source_path: str, destination_path: str, log):
-    # add key: filepath and value: hash to the SOURCE dict
+def update_record(source, destination):
+    global SOURCE
+    global DESTINATION
     SOURCE = {}
     DESTINATION = {}
-    update_record(SOURCE, source_path, create_folder=destination_path)
-    # add key: filepath and value: hash to the DESTINATION dict
-    update_record(DESTINATION, destination_path)
-    print(SOURCE, DESTINATION)
-    # synchronized 
+    for root, _, files in os.walk(source):
+        directory = root.split(source)[1][1:]
+        if len(directory) > 1:
+            SOURCE[directory] = hashlib.md5(directory.encode()).hexdigest()
+            
+        for file in files:
+            SOURCE[os.path.join(directory, file)] = hashlib.md5(read_file(os.path.join(root, file))).hexdigest()
+
+    for root, _, files in os.walk(destination):
+        directory = root.split(destination)[1][1:]
+        if len(directory) > 1:
+            DESTINATION[directory] = hashlib.md5(directory.encode()).hexdigest()
+            
+        for file in files:
+            DESTINATION[os.path.join(directory, file)] = hashlib.md5(read_file(os.path.join(root, file))).hexdigest()
+
+
+def synchronize(source: str, destination: str, log):
+    update_record(source, destination)
     if SOURCE == DESTINATION:
-        print("Synchronized")
+        print("synchronized")
     else:
-        # synchronize
-        print("Synchronizing")
         for key, val in SOURCE.items():
+            s = os.path.join(source, key)
+            d = os.path.join(destination, key)     
+            # check key is present in destination
             if DESTINATION.get(key) is None or DESTINATION[key] != SOURCE[key]:
-                cpy_msg = f"copying file {key} to {destination_path}" 
-                if log:
-                    append_file(log, cpy_msg)
-                print(cpy_msg)
-                copy_file(os.path.join(source_path, key), os.path.join(destination_path, key))
-        
-        for key in list(DESTINATION):
+                # if it's a directory, create the folder in destination.
+                if os.path.isdir(s):
+                    if not os.path.exists(d):
+                        md_msg = f"creating folder {key} in {d}"
+                        os.makedirs(d)
+                        if log:
+                            append_file(log, md_msg) 
+                        print(md_msg)
+                else:
+                    cpy_msg = f"copying file {key} to {d}"
+                    copy_file(s,d)
+                    if log:
+                        append_file(log, cpy_msg) 
+                    print(cpy_msg)
+                    
+            DESTINATION[key] = val
+            
+        # folder/files in destination folder not present in source must be removed
+        for key in list(sorted(DESTINATION, reverse=True)):
+            s = os.path.join(source, key)
+            d = os.path.join(destination, key)   
             if SOURCE.get(key) is None:
+                if os.path.isdir(d):
+                    rm_msg = f"removing folder {key} from {d}"
+                    os.rmdir(d)
+                    if log:
+                        append_file(log, rm_msg)
+                    print(rm_msg)
+                if os.path.isfile(d):
+                    rm_file = f"removing file {key} from {d}"
+                    os.remove(d)
+                    if log:
+                        append_file(log, rm_file)
+                    print(rm_file)
                 DESTINATION.pop(key, None)
-                rm_msg = f"removing file {key} from {destination_path}"
-                if log:
-                    append_file(log, rm_msg)
-                print(rm_msg)
-                rm_path = '/Users/anilcharles/Downloads/work/destination/hello/a.txt'
-                os.remove(rm_path)
-                os.rmdir(os.path.dirname(rm_path))
 
 
 if __name__ == '__main__':
